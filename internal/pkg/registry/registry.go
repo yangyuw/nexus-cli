@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/BurntSushi/toml"
 	"net/http"
 	"os"
+	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 const ACCEPT_HEADER = "application/vnd.docker.distribution.manifest.v2+json"
@@ -133,7 +135,6 @@ func (r Registry) ImageManifest(image string, tag string) (ImageManifest, error)
 	json.NewDecoder(resp.Body).Decode(&imageManifest)
 
 	return imageManifest, nil
-
 }
 
 func (r Registry) DeleteImageByTag(image string, tag string) error {
@@ -188,4 +189,34 @@ func (r Registry) getImageSHA(image string, tag string) (string, error) {
 	}
 
 	return resp.Header.Get("docker-content-digest"), nil
+}
+
+func (r Registry) GetImageDate(image string, tag string) (time.Time, error) {
+	client := &http.Client{}
+
+	url := fmt.Sprintf("%s/repository/%s/v2/%s/manifests/%s", r.Host, r.Repository, image, tag)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return time.Now(), err
+	}
+	req.SetBasicAuth(r.Username, r.Password)
+	req.Header.Add("Accept", ACCEPT_HEADER)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return time.Now(), err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return time.Now(), errors.New(fmt.Sprintf("HTTP Code: %d", resp.StatusCode))
+	}
+
+	t, err := time.Parse(time.RFC1123, resp.Header.Get("last-modified"))
+
+	if err != nil {
+		return time.Now(), err
+	}
+
+	return t, nil
 }
