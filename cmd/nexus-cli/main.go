@@ -4,28 +4,56 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"sort"
+	"time"
 
-	"github.com/mlabouardy/nexus-cli/registry"
+	"github.com/13rentgen/nexus-cli/internal/pkg/registry"
 	"github.com/urfave/cli"
 )
 
 const (
-	CREDENTIALS_TEMPLATES = `# Nexus Credentials
+	credentialsTemplates = `# Nexus Credentials
 nexus_host = "{{ .Host }}"
 nexus_username = "{{ .Username }}"
 nexus_password = "{{ .Password }}"
 nexus_repository = "{{ .Repository }}"`
 )
 
+// Version current package version
+var Version string
+
+type tagDate struct {
+	Tag  string
+	Date time.Time
+}
+
+type tagsAndDate []tagDate
+
+func (p tagsAndDate) Len() int {
+	return len(p)
+}
+
+func (p tagsAndDate) Less(i, j int) bool {
+	return p[i].Date.Before(p[j].Date)
+}
+
+func (p tagsAndDate) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+}
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "Nexus CLI"
 	app.Usage = "Manage Docker Private Registry on Nexus"
-	app.Version = "1.0.0-beta"
+	app.Version = Version
 	app.Authors = []cli.Author{
 		cli.Author{
 			Name:  "Mohamed Labouardy",
 			Email: "mohamed@labouardy.com",
+		},
+		cli.Author{
+			Name:  "Alexandr Zaytsev",
+			Email: "13rentgen@gmail.com",
 		},
 	}
 	app.Commands = []cli.Command{
@@ -137,7 +165,7 @@ func setNexusCredentials(c *cli.Context) error {
 		repository,
 	}
 
-	tmpl, err := template.New(".credentials").Parse(CREDENTIALS_TEMPLATES)
+	tmpl, err := template.New(".credentials").Parse(credentialsTemplates)
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
@@ -181,17 +209,24 @@ func listTagsByImage(c *cli.Context) error {
 	}
 	tags, err := r.ListTagsByImage(imgName)
 
-	compareStringNumber := func(str1, str2 string) bool {
-		return extractNumberFromString(str1) < extractNumberFromString(str2)
-	}
-	Compare(compareStringNumber).Sort(tags)
+	sortedTags := make(tagsAndDate, 0, len(tags))
 
-	if err != nil {
-		return cli.NewExitError(err.Error(), 1)
-	}
 	for _, tag := range tags {
-		fmt.Println(tag)
+		date, err := r.GetImageTagDate(imgName, tag)
+
+		if err != nil {
+			return cli.NewExitError(err.Error(), 1)
+		}
+
+		sortedTags = append(sortedTags, tagDate{Date: date, Tag: tag})
 	}
+
+	sort.Sort(sortedTags)
+
+	for _, tag := range sortedTags {
+		fmt.Printf("%s created at %s\n", tag.Tag, tag.Date)
+	}
+
 	fmt.Printf("There are %d images for %s\n", len(tags), imgName)
 	return nil
 }
@@ -226,40 +261,59 @@ func deleteImage(c *cli.Context) error {
 	if imgName == "" {
 		fmt.Fprintf(c.App.Writer, "You should specify the image name\n")
 		cli.ShowSubcommandHelp(c)
-	} else {
-		r, err := registry.NewRegistry()
+
+		return nil
+	}
+
+	r, err := registry.NewRegistry()
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	if tag == "" {
+		if keep == 0 {
+			fmt.Fprintf(c.App.Writer, "You should either specify the tag or how many images you want to keep\n")
+			cli.ShowSubcommandHelp(c)
+
+			return nil
+		}
+
+		tags, err := r.ListTagsByImage(imgName)
 		if err != nil {
 			return cli.NewExitError(err.Error(), 1)
 		}
-		if tag == "" {
-			if keep == 0 {
-				fmt.Fprintf(c.App.Writer, "You should either specify the tag or how many images you want to keep\n")
-				cli.ShowSubcommandHelp(c)
-			} else {
-				tags, err := r.ListTagsByImage(imgName)
-				compareStringNumber := func(str1, str2 string) bool {
-					return extractNumberFromString(str1) < extractNumberFromString(str2)
-				}
-				Compare(compareStringNumber).Sort(tags)
-				if err != nil {
-					return cli.NewExitError(err.Error(), 1)
-				}
-				if len(tags) >= keep {
-					for _, tag := range tags[:len(tags)-keep] {
-						fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag)
-						r.DeleteImageByTag(imgName, tag)
-					}
-				} else {
-					fmt.Printf("Only %d images are available\n", len(tags))
-				}
-			}
-		} else {
-			err = r.DeleteImageByTag(imgName, tag)
+
+		if len(tags) <= keep {
+			fmt.Printf("Only %d images are available\n", len(tags))
+			return nil
+		}
+
+		sortedTags := make(tagsAndDate, 0, len(tags))
+
+		for _, tag := range tags {
+			date, err := r.GetImageTagDate(imgName, tag)
+
 			if err != nil {
 				return cli.NewExitError(err.Error(), 1)
 			}
+
+			sortedTags = append(sortedTags, tagDate{Date: date, Tag: tag})
 		}
+
+		sort.Sort(sortedTags)
+
+		for _, tag := range sortedTags[:len(tags)-keep] {
+			fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag.Tag)
+			r.DeleteImageByTag(imgName, tag.Tag)
+		}
+
+		return nil
 	}
+
+	err = r.DeleteImageByTag(imgName, tag)
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+
 	return nil
 }
 

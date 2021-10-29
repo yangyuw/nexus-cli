@@ -1,3 +1,5 @@
 .idea/
 .credentials
 .DS_Store
+vendor
+dist
