@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	CREDENTIALS_TEMPLATES = `# Nexus Credentials
+	credentialsTemplates = `# Nexus Credentials
 nexus_host = "{{ .Host }}"
 nexus_username = "{{ .Username }}"
 nexus_password = "{{ .Password }}"
 nexus_repository = "{{ .Repository }}"`
 )
 
+// Version current package version
 var Version string
 
 type tagDate struct {
@@ -164,7 +165,7 @@ func setNexusCredentials(c *cli.Context) error {
 		repository,
 	}
 
-	tmpl, err := template.New(".credentials").Parse(CREDENTIALS_TEMPLATES)
+	tmpl, err := template.New(".credentials").Parse(credentialsTemplates)
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
@@ -211,7 +212,7 @@ func listTagsByImage(c *cli.Context) error {
 	sortedTags := make(tagsAndDate, 0, len(tags))
 
 	for _, tag := range tags {
-		date, err := r.GetImageDate(imgName, tag)
+		date, err := r.GetImageTagDate(imgName, tag)
 
 		if err != nil {
 			return cli.NewExitError(err.Error(), 1)
@@ -289,7 +290,7 @@ func deleteImage(c *cli.Context) error {
 		sortedTags := make(tagsAndDate, 0, len(tags))
 
 		for _, tag := range tags {
-			date, err := r.GetImageDate(imgName, tag)
+			date, err := r.GetImageTagDate(imgName, tag)
 
 			if err != nil {
 				return cli.NewExitError(err.Error(), 1)
