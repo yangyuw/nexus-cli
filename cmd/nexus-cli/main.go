@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"regexp"
 	"sort"
 	"time"
 
@@ -115,6 +116,9 @@ func main() {
 						},
 						cli.StringFlag{
 							Name: "keep, k",
+						},
+						cli.StringFlag{
+							Name: "regex, r",
 						},
 					},
 					Action: func(c *cli.Context) error {
@@ -258,10 +262,11 @@ func deleteImage(c *cli.Context) error {
 	var imgName = c.String("name")
 	var tag = c.String("tag")
 	var keep = c.Int("keep")
+	var regex = c.String("regex")
+
 	if imgName == "" {
 		fmt.Fprintf(c.App.Writer, "You should specify the image name\n")
 		cli.ShowSubcommandHelp(c)
-
 		return nil
 	}
 
@@ -269,11 +274,11 @@ func deleteImage(c *cli.Context) error {
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
+
 	if tag == "" {
 		if keep == 0 {
 			fmt.Fprintf(c.App.Writer, "You should either specify the tag or how many images you want to keep\n")
 			cli.ShowSubcommandHelp(c)
-
 			return nil
 		}
 
@@ -291,21 +296,33 @@ func deleteImage(c *cli.Context) error {
 
 		for _, tag := range tags {
 			date, err := r.GetImageTagDate(imgName, tag)
-
 			if err != nil {
 				return cli.NewExitError(err.Error(), 1)
 			}
-
 			sortedTags = append(sortedTags, tagDate{Date: date, Tag: tag})
 		}
 
 		sort.Sort(sortedTags)
 
-		for _, tag := range sortedTags[:len(tags)-keep] {
-			fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag.Tag)
-			r.DeleteImageByTag(imgName, tag.Tag)
+		var regexMatcher *regexp.Regexp
+		if regex != "" {
+			regexMatcher, err = regexp.Compile(regex)
+			if err != nil {
+				return cli.NewExitError(fmt.Sprintf("Invalid regex: %s", err.Error()), 1)
+			}
 		}
 
+		for _, tag := range sortedTags[:len(tags)-keep] {
+			if regexMatcher != nil && regexMatcher.MatchString(tag.Tag) {
+				fmt.Printf("%s:%s matches regex and will not be deleted\n", imgName, tag.Tag)
+				continue
+			}
+			fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag.Tag)
+			err := r.DeleteImageByTag(imgName, tag.Tag)
+			if err != nil {
+				fmt.Printf("Failed to delete %s:%s: %s\n", imgName, tag.Tag, err.Error())
+			}
+		}
 		return nil
 	}
 
